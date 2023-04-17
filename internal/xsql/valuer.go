@@ -230,6 +230,8 @@ type ValuerEval struct {
 	// IntegerFloatDivision will set the eval system to treat
 	// a division between two integers as a floating point division.
 	IntegerFloatDivision bool
+
+	StreamMap map[string]string
 }
 
 // Eval evaluates an expression and returns a value.
@@ -406,7 +408,8 @@ func (v *ValuerEval) Eval(expr ast.Expr) interface{} {
 			n = expr.Name
 		}
 		if n != "" {
-			val, ok := v.Valuer.Value(n, t)
+			realName := v.transformStreamName(t)
+			val, ok := v.Valuer.Value(n, realName)
 			if ok {
 				return val
 			}
@@ -456,6 +459,16 @@ func (v *ValuerEval) Eval(expr ast.Expr) interface{} {
 	default:
 		return nil
 	}
+}
+
+func (v *ValuerEval) transformStreamName(t string) string {
+	var realName string
+	if v, ok := v.StreamMap[t]; ok {
+		realName = v
+	} else {
+		realName = t
+	}
+	return realName
 }
 
 func (v *ValuerEval) evalBinaryExpr(expr *ast.BinaryExpr) interface{} {

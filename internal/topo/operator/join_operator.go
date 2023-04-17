@@ -21,10 +21,26 @@ import (
 	"github.com/lf-edge/ekuiper/pkg/ast"
 )
 
+func BuildJoinOp(stmt *ast.SelectStatement, table *ast.Table) *JoinOp {
+	m:=make(map[string]string)
+	for _,v:=range stmt.Sources {
+		vv:=v.(*ast.Table)
+		m[vv.Alias] =vv.Name
+	}
+	for _,v:=range stmt.Joins {
+		m[v.Alias] = v.Name
+	}
+	pp := &JoinOp{Joins: stmt.Joins, From: table,
+		streamMap: m,
+	}
+	return pp
+}
+
 // JoinOp TODO join expr should only be the equal op between 2 streams like tb1.id = tb2.id
 type JoinOp struct {
 	From  *ast.Table
 	Joins ast.Joins
+	streamMap map[string]string
 }
 
 // Apply
@@ -99,7 +115,12 @@ func (jp *JoinOp) getStreamNames(join *ast.Join) ([]string, error) {
 		}
 	}
 
-	return srcs, nil
+	newSrcs:=[]string{}
+	for _,v:=range srcs {
+		newSrcs = append(newSrcs,jp.transformStreamAliasToStreamName(v))
+	}
+
+	return newSrcs, nil
 }
 
 func (jp *JoinOp) evalSet(input xsql.MergedCollection, join ast.Join, fv *xsql.FunctionValuer) (*xsql.JoinTuples, error) {
@@ -151,7 +172,7 @@ func (jp *JoinOp) evalSet(input xsql.MergedCollection, join ast.Join, fv *xsql.F
 				temp := &xsql.JoinTuple{}
 				temp.AddTuple(left)
 				temp.AddTuple(right)
-				ve := &xsql.ValuerEval{Valuer: xsql.MultiValuer(temp, fv)}
+				ve := &xsql.ValuerEval{Valuer: xsql.MultiValuer(temp, fv),StreamMap: jp.streamMap}
 				result := evalOn(join, ve, left, right)
 				merged.AliasMap = temp.AliasMap
 				switch val := result.(type) {
@@ -234,7 +255,7 @@ func (jp *JoinOp) evalSetWithRightJoin(input xsql.MergedCollection, join ast.Joi
 			temp := &xsql.JoinTuple{}
 			temp.AddTuple(right)
 			temp.AddTuple(left)
-			ve := &xsql.ValuerEval{Valuer: xsql.MultiValuer(temp, fv)}
+			ve := &xsql.ValuerEval{Valuer: xsql.MultiValuer(temp, fv),StreamMap: jp.streamMap}
 			result := evalOn(join, ve, left, right)
 			merged.AliasMap = temp.AliasMap
 			switch val := result.(type) {
@@ -270,6 +291,7 @@ func (jp *JoinOp) evalJoinSets(set *xsql.JoinTuples, input xsql.MergedCollection
 	} else {
 		rightStream = join.Alias
 	}
+	rightStream = jp.transformStreamAliasToStreamName(rightStream)
 
 	rights := input.GetBySrc(rightStream)
 
@@ -293,7 +315,7 @@ func (jp *JoinOp) evalJoinSets(set *xsql.JoinTuples, input xsql.MergedCollection
 				temp.AddTuples(left.Tuples)
 				temp.AddTuple(right)
 
-				ve := &xsql.ValuerEval{Valuer: xsql.MultiValuer(temp, fv)}
+				ve := &xsql.ValuerEval{Valuer: xsql.MultiValuer(temp, fv),StreamMap: jp.streamMap}
 				result := evalOn(join, ve, left, right)
 				merged.AliasMap = left.AliasMap
 				switch val := result.(type) {
@@ -343,6 +365,8 @@ func (jp *JoinOp) evalRightJoinSets(set *xsql.JoinTuples, input xsql.MergedColle
 	} else {
 		rightStream = join.Alias
 	}
+
+	rightStream = jp.transformStreamAliasToStreamName(rightStream)
 	rights := input.GetBySrc(rightStream)
 
 	newSets := &xsql.JoinTuples{Content: make([]*xsql.JoinTuple, 0)}
@@ -357,7 +381,7 @@ func (jp *JoinOp) evalRightJoinSets(set *xsql.JoinTuples, input xsql.MergedColle
 			temp := &xsql.JoinTuple{}
 			temp.AddTuples(left.Tuples)
 			temp.AddTuple(right)
-			ve := &xsql.ValuerEval{Valuer: xsql.MultiValuer(temp, fv)}
+			ve := &xsql.ValuerEval{Valuer: xsql.MultiValuer(temp, fv),StreamMap: jp.streamMap}
 			result := evalOn(join, ve, left, right)
 			merged.AliasMap = left.AliasMap
 			switch val := result.(type) {
@@ -385,4 +409,12 @@ func (jp *JoinOp) evalRightJoinSets(set *xsql.JoinTuples, input xsql.MergedColle
 		}
 	}
 	return newSets, nil
+}
+
+func (jp *JoinOp) transformStreamAliasToStreamName(v string) string {
+	if s,ok:=jp.streamMap[v];ok {
+	return s
+	} else {
+		return v
+	}
 }
